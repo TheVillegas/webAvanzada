@@ -190,3 +190,84 @@ Procedimiento completo, en orden de prioridad:
 5. **Auditar el uso** de la credencial expuesta por si hubo accesos indebidos, y **prevenir la reincidencia** con herramientas como `gitleaks` o `git-secrets` en un pre-commit hook.
 
 La lección de fondo: en seguridad no se pregunta *"¿alguien lo vio?"* sino *"¿pudo alguien verlo?"*. Si pudo, ya está comprometido.
+
+---
+
+## Parte IV — Terraform y CD básico a staging
+
+### Pregunta 13 (2 pts). ¿Qué diferencia existe entre `terraform validate`, `terraform plan` y `terraform apply`?
+
+Son tres niveles de verificación, cada uno más profundo y más costoso que el anterior:
+
+| Comando | Qué hace | Consulta el estado real | Modifica infraestructura |
+|---|---|---|---|
+| `terraform validate` | Verifica sintaxis HCL, tipos, referencias a variables y coherencia interna de la configuración. | No | No |
+| `terraform plan` | Compara la configuración deseada contra el estado actual y calcula el diff: qué se crea, modifica o destruye. | Sí | No |
+| `terraform apply` | Ejecuta ese diff contra los proveedores. Es la única etapa con efectos reales. | Sí | **Sí** |
+
+En detalle:
+
+- **`validate`** es un chequeo **offline**. No necesita credenciales ni acceso a red. Responde: *"¿esta configuración está bien escrita?"*. Detecta un `var.enviroment` mal tipeado o un tipo incompatible, pero no sabe nada del mundo real. Es el equivalente a que compile el código.
+- **`plan`** es el **dry-run**. Lee el estado (`terraform.tfstate`), consulta la infraestructura existente y produce el plan de ejecución. Responde: *"¿qué pasaría si aplico esto?"*. En este laboratorio devolvió `Plan: 1 to add, 0 to change, 0 to destroy`. Es la etapa donde se revisa —y donde se detecta un `destroy` inesperado **antes** de que ocurra.
+- **`apply`** **ejecuta**. Crea, modifica o destruye recursos y actualiza el estado. Es irreversible sin un `destroy` o un rollback explícito. Por eso `-auto-approve` (que salta la confirmación interactiva) solo es aceptable en un pipeline donde el plan ya fue revisado o el alcance está acotado, como acá.
+
+**El principio de fondo**: validar es barato, planificar es intermedio, aplicar es caro e irreversible. El pipeline los ordena de menor a mayor riesgo para que un error se detecte en la etapa más barata posible. Es exactamente el mismo criterio con el que CI corre las pruebas antes del build.
+
+### Pregunta 14 (2 pts). ¿Por qué `ci.yml` se activa con `pull_request` y `cd.yml` se activa con `push` sobre `main`?
+
+Porque **responden preguntas distintas, en momentos distintos del ciclo de vida del cambio**.
+
+**`ci.yml` — `pull_request`: ¿este cambio es apto para entrar?**
+El Pull Request es el instante exacto en que un cambio *pide permiso* para integrarse. Validar ahí permite rechazarlo antes de que contamine la rama estable: el costo de arreglar es mínimo y el impacto queda contenido en la rama. Validar después de integrar sería llegar tarde — el problema ya estaría adentro.
+
+**`cd.yml` — `push` sobre `main`: este cambio ya fue aprobado, hay que entregarlo.**
+Un push a `main` solo puede ocurrir tras la integración de un PR aprobado y con CI en verde. O sea, es la **señal de que existe una versión validada y lista para publicar**. Disparar el despliegue ahí garantiza que solo se entrega código que ya pasó la compuerta de calidad.
+
+Lo que sostiene el diseño es la relación entre ambos:
+
+- Si el CD se disparara con `pull_request`, se desplegaría código **no aprobado** —incluso de forks—, y cada rama en progreso pisaría el ambiente de staging. El ambiente dejaría de reflejar un estado confiable.
+- Si el CI se disparara solo con `push` a `main`, la validación llegaría **después** de la integración: `main` podría romperse y recién ahí nos enteraríamos.
+
+Cada evento marca una transición: `pull_request` = *"quiero entrar"* → se valida. `push` a `main` = *"ya entré"* → se entrega. **CI protege la rama; CD publica desde la rama protegida.**
+
+### Pregunta 15 (2 pts). ¿Qué función cumple Terraform dentro de este flujo de CD?
+
+Terraform es la capa de **Infraestructura como Código (IaC)**: define de forma declarativa y versionada *cómo* queda preparado el ambiente de destino, y ejecuta esa preparación de manera reproducible.
+
+En este laboratorio, concretamente:
+
+- Declara el ambiente mediante la variable `environment`, que el pipeline inyecta desde una GitHub Variable a través de `TF_VAR_environment: ${{ vars.APP_ENV }}`. La convención `TF_VAR_<nombre>` es el puente entre las variables de entorno del runner y las variables de Terraform.
+- Materializa la entrega con `terraform_data` y un provisioner `local-exec`, que copia el artefacto compilado (`frontend/dist/frontend/browser/`) al directorio `staging/`.
+- Expone el resultado con el output `deployment_path`, dejando explícito dónde quedó el despliegue.
+
+Lo importante son las **propiedades** que aporta, no el `cp`:
+
+- **Declarativo**: se describe el estado deseado, no la secuencia de pasos. Terraform calcula el diff.
+- **Idempotente y con estado**: gracias a `triggers_replace`, si nada cambió no vuelve a ejecutar. Ejecutarlo diez veces deja el mismo resultado que ejecutarlo una.
+- **Versionado y auditable**: la definición del ambiente vive en Git, con historia y revisión por PR. La infraestructura deja de ser un conjunto de pasos manuales en la cabeza de alguien.
+- **Portable**: el mismo flujo —`init` → `validate` → `plan` → `apply`— escala a S3, CloudFront, Kubernetes o cualquier proveedor real cambiando solo los recursos. El pipeline no cambia.
+
+**Aclaración de alcance**: acá el destino es un directorio local dentro del runner, deliberadamente, para no requerir cuentas cloud ni credenciales reales. Es un despliegue *simulado*. Lo que se está aprendiendo no es el `local-exec`, sino el **flujo**: infraestructura declarada en código, validada antes de aplicarse, ejecutada automáticamente desde el pipeline.
+
+### Pregunta 16 (2 pts). ¿Por qué el workflow usa `${{ secrets.DEMO_TOKEN }}` en lugar de escribir el valor directamente?
+
+Porque `secrets` es un mecanismo con garantías que un literal en el YAML no tiene:
+
+1. **El valor nunca entra al repositorio.** El `cd.yml` es un archivo versionado y público. Escribir el token ahí lo expondría en la historia de Git, en cada clon y en cada fork — permanentemente (ver Pregunta 12).
+2. **GitHub enmascara el valor en los logs.** Si el secreto aparece en la salida de un step, se reemplaza por `***`. Con un literal no hay tal protección: cualquiera con acceso a los logs de Actions lo lee.
+3. **Se inyecta solo en tiempo de ejecución y con alcance acotado.** En el workflow se expone como variable de entorno **únicamente en el step que lo necesita**:
+
+   ```yaml
+   - name: Verificar secreto configurado
+     env:
+       DEMO_TOKEN: ${{ secrets.DEMO_TOKEN }}
+     run: test -n "$DEMO_TOKEN"
+   ```
+
+   Los demás steps no lo ven. Eso es **principio de menor privilegio** aplicado al pipeline.
+4. **Permite rotar sin tocar el código.** Se actualiza en `Settings → Secrets and variables → Actions` y todos los workflows toman el nuevo valor en la siguiente ejecución. Cero commits, cero despliegues.
+5. **Es write-only y auditable.** Una vez guardado, ni el dueño del repositorio puede volver a leerlo desde la interfaz — solo reemplazarlo. GitHub además restringe su exposición: por defecto no se entrega a workflows disparados desde forks.
+
+Nótese el contraste deliberado dentro del mismo `cd.yml`: `${{ vars.APP_ENV }}` para configuración **legible** (`staging`) y `${{ secrets.DEMO_TOKEN }}` para un valor **sensible**. Mismo mecanismo de inyección, distinto nivel de protección — porque son dos categorías distintas de dato (ver Pregunta 10).
+
+Y el step `test -n "$DEMO_TOKEN"` cumple un rol de **fail-fast**: verifica que el secreto esté configurado y no vacío *antes* de llegar a `terraform apply`. Si falta, el pipeline corta temprano con un error claro, en lugar de fallar de forma confusa en una etapa posterior.
