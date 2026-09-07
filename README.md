@@ -5,9 +5,9 @@ Git, Angular, Integración Continua y CD básico con Terraform · Segundo semest
 
 | Campo            | Valor                                                               |
 | ---------------- | ------------------------------------------------------------------- |
-| Integrante 1     | _(completar)_                                                       |
+| Integrante 1     | Matias Eliseo Villegas Muñoz                                        |
 | Integrante 2     | _(completar)_                                                       |
-| Sección          | _(completar)_                                                       |
+| Sección          | OII436-1                                                            |
 | Fecha            | 07 de septiembre de 2026                                            |
 | Rama obligatoria | `devops/ci-cd`                                                      |
 | Repositorio      | https://github.com/TheVillegas/webAvanzada                          |
@@ -28,7 +28,7 @@ webAvanzada/
 
 ---
 
-## Parte I — Repositorio y frontend Angular
+## Parte I: Repositorio y frontend Angular
 
 ### Pregunta 1 (2 pts). ¿Por qué no se recomienda desarrollar directamente sobre `main`?
 
@@ -40,9 +40,6 @@ Trabajar en una rama de trabajo (`devops/ci-cd`) permite:
 - **Habilitar la revisión mediante Pull Request**: el código se discute antes de integrarse, no después.
 - **Ejecutar CI como compuerta de calidad**: el workflow corre sobre el PR y bloquea la integración si las pruebas o el build fallan. Si commiteáramos sobre `main`, la validación llegaría tarde: el problema ya estaría integrado.
 - **Poder revertir con bajo costo**: se descarta o corrige la rama sin reescribir la historia de `main`.
-
-En resumen: `main` es el resultado de un trabajo ya validado, no el lugar donde se hace ese trabajo.
-
 ### Pregunta 2 (2 pts). ¿Qué problema se evita al utilizar `--skip-git` al crear el proyecto Angular?
 
 Angular CLI, por defecto, inicializa un repositorio Git propio en la carpeta que crea. Como `frontend/` vive **dentro** de un repositorio ya inicializado (`webAvanzada`), eso generaría un `.git/` anidado: dos repositorios independientes, uno adentro del otro.
@@ -132,15 +129,15 @@ Es un comportamiento **deseado**, no una limitación: si el código no supera la
 **No.** debido a lo que significa `main`.
 
 - `main` es la rama desde la que se despliega. En este mismo laboratorio, `cd.yml` se dispara con `push` sobre `main`: integrar código roto no lo deja "roto y quieto", lo **despliega automáticamente a staging**. El error se propaga solo.
-- Un pipeline en rojo es información concreta: el software **no cumple su contrato verificable**. Ignorarla convierte al CI en decoración. Un check que se saltea cuando molesta deja de ser una compuerta de calidad y pasa a ser ruido — y el equipo aprende a no mirarlo.
+- Un pipeline en rojo es información concreta: el software **no cumple su contrato verificable**. Ignorarla convierte al CI en decoración. Un check que se saltea cuando molesta deja de ser una compuerta de calidad y pasa a ser ruido y el equipo aprende a no mirarlo.
 - El costo de arreglar sube con el tiempo. En la rama, el fallo afecta a una persona y se corrige con un commit. En `main`, bloquea a todo el equipo: cada quien que ramifique parte de una base rota y no sabrá si el error es suyo o heredado.
 - Se pierde la trazabilidad: cuando `main` está siempre verde, cualquier fallo nuevo apunta al último cambio. Cuando se tolera el rojo, ya no se puede distinguir el fallo nuevo del preexistente.
 
-El procedimiento correcto es el que se aplicó: corregir en la rama `devops/ci-cd`, pushear, esperar el check en verde y **recién entonces** integrar. Por eso conviene además proteger `main` con *branch protection* que exija el check aprobado — así la regla no depende de la disciplina de nadie.
+El procedimiento correcto es el que se aplicó: corregir en la rama `devops/ci-cd`, pushear, esperar el check en verde y **recién entonces** integrar. Por eso conviene además proteger `main` con *branch protection* que exija el check aprobado , donde así la regla no depende de la disciplina de nadie.
 
 ---
 
-## Parte III — Gestión segura de secretos y configuración
+## Parte III Gestión segura de secretos y configuración
 
 ### Pregunta 10 (4 pts). Clasifique cada elemento
 
@@ -159,19 +156,17 @@ Y una distinción que se confunde seguido: **configuración ≠ secreto**. Ambos
 
 ### Pregunta 11 (2 pts). ¿Por qué una contraseña o token no debe escribirse directamente dentro de `ci.yml`, `cd.yml` o un archivo TypeScript del frontend?
 
-Por tres razones que se acumulan:
+**1. Un secreto en el repositorio es un secreto público.** El valor queda en la historia de Git y se replica en cada clon, fork, mirror y backup. En un repositorio público lo indexan bots en minutos debido a que existen crawlers dedicados a escanear repositorios en GitHub buscando credenciales. Y aunque el repositorio sea privado, cualquier persona con acceso de lectura, presente o futura, lo obtiene, donde ademas se pierde el principio de menor privilegio.
 
-**1. Un secreto en el repositorio es un secreto público.** El valor queda en la historia de Git y se replica en cada clon, fork, mirror y backup. En un repositorio público lo indexan bots en minutos —existen crawlers dedicados a escanear GitHub buscando credenciales—. Y aunque el repositorio sea privado, cualquier persona con acceso de lectura, presente o futura, lo obtiene: se pierde el principio de menor privilegio.
+**2. Se pierde la rotación y la trazabilidad.** Un secreto gestionado se cambia en un solo lugar y sigue funcionando. Uno hardcodeado obliga a un commit, un PR y un despliegue por cada rotación. así que en la práctica **no se rota nunca**. Además no hay registro de quién lo usó ni cuándo.
 
-**2. Se pierde la rotación y la trazabilidad.** Un secreto gestionado se cambia en un solo lugar y sigue funcionando. Uno hardcodeado obliga a un commit, un PR y un despliegue por cada rotación — así que en la práctica **no se rota nunca**. Además no hay registro de quién lo usó ni cuándo.
-
-**3. En el frontend es directamente inútil como protección.** Este punto es el más importante y el que más se subestima: TypeScript **se compila y se entrega al navegador**. Cualquier valor puesto ahí termina dentro del bundle JavaScript que se descarga el usuario, y se lee abriendo DevTools. No existe forma de ocultar un secreto en código de cliente — no es una mala práctica, es una imposibilidad técnica. Si una operación necesita una credencial, esa operación pertenece al backend.
+**3. En el frontend es directamente inútil como protección.** Este punto es el más importante y el que más se subestima: TypeScript **se compila y se entrega al navegador**. Cualquier valor puesto ahí termina dentro del bundle JavaScript que se descarga el usuario, y se lee abriendo DevTools. No existe forma de ocultar un secreto en código de cliente, no es una mala práctica, es una imposibilidad técnica. Si una operación necesita una credencial, esa operación pertenece al backend.
 
 Por eso el workflow usa `${{ secrets.DEMO_TOKEN }}`: GitHub inyecta el valor como variable de entorno solo durante la ejecución del job, y además **enmascara** cualquier aparición del valor en los logs (lo reemplaza por `***`).
 
 ### Pregunta 12 (2 pts). Si un secreto real fue incluido en un commit y luego se agrega su archivo a `.gitignore`, ¿queda solucionado el problema?
 
-**No. No queda solucionado en absoluto.**
+**No queda solucionado en absoluto.**
 
 `.gitignore` solo evita que Git empiece a rastrear archivos **no rastreados**. No tiene ningún efecto retroactivo:
 
@@ -179,21 +174,19 @@ Por eso el workflow usa `${{ secrets.DEMO_TOKEN }}`: GitHub inyecta el valor com
 - Si el archivo ya estaba siendo rastreado, `.gitignore` **ni siquiera lo deja de rastrear**: hay que ejecutar además `git rm --cached <archivo>`.
 - Cada clon, fork y backup existente **ya tiene una copia** del secreto. Aunque limpies el repositorio remoto, no controlás esas copias.
 
-**La acción adicional imprescindible es ROTAR EL SECRETO**, y es lo primero que hay que hacer. Desde el instante en que se publicó, hay que considerarlo comprometido: revocar la credencial en el proveedor y emitir una nueva. Limpiar la historia sin rotar es teatro de seguridad — el valor ya salió.
+**La acción adicional imprescindible es ROTAR EL SECRETO**, y es lo primero que hay que hacer. Desde el instante en que se publicó, hay que considerarlo comprometido: revocar la credencial en el proveedor y emitir una nueva.
 
 Procedimiento completo, en orden de prioridad:
 
-1. **Rotar / revocar la credencial expuesta.** Urgente e innegociable. Todo lo demás es secundario.
+1. **Rotar / revocar la credencial expuesta.** Urgente e inegociable. Todo lo demás es secundario.
 2. **Guardar el nuevo valor donde corresponde**: GitHub Secret, gestor de secretos o `.env` local ignorado.
 3. **Dejar de rastrear el archivo**: `git rm --cached .env` y commitear, con la regla ya presente en `.gitignore`.
 4. **Purgar la historia** si el repositorio es público o el riesgo lo amerita, con `git filter-repo` o BFG Repo-Cleaner. Ojo: esto **reescribe la historia**, cambia todos los hashes posteriores y obliga a un `push --force` coordinado con el equipo.
 5. **Auditar el uso** de la credencial expuesta por si hubo accesos indebidos, y **prevenir la reincidencia** con herramientas como `gitleaks` o `git-secrets` en un pre-commit hook.
 
-La lección de fondo: en seguridad no se pregunta *"¿alguien lo vio?"* sino *"¿pudo alguien verlo?"*. Si pudo, ya está comprometido.
-
 ---
 
-## Parte IV — Terraform y CD básico a staging
+## Parte IV Terraform y CD básico a staging
 
 ### Pregunta 13 (2 pts). ¿Qué diferencia existe entre `terraform validate`, `terraform plan` y `terraform apply`?
 
@@ -208,24 +201,21 @@ Son tres niveles de verificación, cada uno más profundo y más costoso que el 
 En detalle:
 
 - **`validate`** es un chequeo **offline**. No necesita credenciales ni acceso a red. Responde: *"¿esta configuración está bien escrita?"*. Detecta un `var.enviroment` mal tipeado o un tipo incompatible, pero no sabe nada del mundo real. Es el equivalente a que compile el código.
-- **`plan`** es el **dry-run**. Lee el estado (`terraform.tfstate`), consulta la infraestructura existente y produce el plan de ejecución. Responde: *"¿qué pasaría si aplico esto?"*. En este laboratorio devolvió `Plan: 1 to add, 0 to change, 0 to destroy`. Es la etapa donde se revisa —y donde se detecta un `destroy` inesperado **antes** de que ocurra.
+- **`plan`** es el **dry-run**. Lee el estado (`terraform.tfstate`), consulta la infraestructura existente y produce el plan de ejecución. Responde: *"¿qué pasaría si aplico esto?"*. En este laboratorio devolvió `Plan: 1 to add, 0 to change, 0 to destroy`. Es la etapa donde se revisa y donde se detecta un `destroy` inesperado **antes** de que ocurra.
 - **`apply`** **ejecuta**. Crea, modifica o destruye recursos y actualiza el estado. Es irreversible sin un `destroy` o un rollback explícito. Por eso `-auto-approve` (que salta la confirmación interactiva) solo es aceptable en un pipeline donde el plan ya fue revisado o el alcance está acotado, como acá.
-
-**El principio de fondo**: validar es barato, planificar es intermedio, aplicar es caro e irreversible. El pipeline los ordena de menor a mayor riesgo para que un error se detecte en la etapa más barata posible. Es exactamente el mismo criterio con el que CI corre las pruebas antes del build.
-
 ### Pregunta 14 (2 pts). ¿Por qué `ci.yml` se activa con `pull_request` y `cd.yml` se activa con `push` sobre `main`?
 
 Porque **responden preguntas distintas, en momentos distintos del ciclo de vida del cambio**.
 
-**`ci.yml` — `pull_request`: ¿este cambio es apto para entrar?**
+**`ci.yml` —>`pull_request`: ¿este cambio es apto para entrar?**
 El Pull Request es el instante exacto en que un cambio *pide permiso* para integrarse. Validar ahí permite rechazarlo antes de que contamine la rama estable: el costo de arreglar es mínimo y el impacto queda contenido en la rama. Validar después de integrar sería llegar tarde — el problema ya estaría adentro.
 
-**`cd.yml` — `push` sobre `main`: este cambio ya fue aprobado, hay que entregarlo.**
+**`cd.yml` — >`push` sobre `main`: este cambio ya fue aprobado, hay que entregarlo.**
 Un push a `main` solo puede ocurrir tras la integración de un PR aprobado y con CI en verde. O sea, es la **señal de que existe una versión validada y lista para publicar**. Disparar el despliegue ahí garantiza que solo se entrega código que ya pasó la compuerta de calidad.
 
 Lo que sostiene el diseño es la relación entre ambos:
 
-- Si el CD se disparara con `pull_request`, se desplegaría código **no aprobado** —incluso de forks—, y cada rama en progreso pisaría el ambiente de staging. El ambiente dejaría de reflejar un estado confiable.
+- Si el CD se disparara con `pull_request`, se desplegaría código **no aprobado**, incluso de forks, y cada rama en progreso pisaría el ambiente de staging. El ambiente dejaría de reflejar un estado confiable.
 - Si el CI se disparara solo con `push` a `main`, la validación llegaría **después** de la integración: `main` podría romperse y recién ahí nos enteraríamos.
 
 Cada evento marca una transición: `pull_request` = *"quiero entrar"* → se valida. `push` a `main` = *"ya entré"* → se entrega. **CI protege la rama; CD publica desde la rama protegida.**
@@ -246,9 +236,6 @@ Lo importante son las **propiedades** que aporta, no el `cp`:
 - **Idempotente y con estado**: gracias a `triggers_replace`, si nada cambió no vuelve a ejecutar. Ejecutarlo diez veces deja el mismo resultado que ejecutarlo una.
 - **Versionado y auditable**: la definición del ambiente vive en Git, con historia y revisión por PR. La infraestructura deja de ser un conjunto de pasos manuales en la cabeza de alguien.
 - **Portable**: el mismo flujo —`init` → `validate` → `plan` → `apply`— escala a S3, CloudFront, Kubernetes o cualquier proveedor real cambiando solo los recursos. El pipeline no cambia.
-
-**Aclaración de alcance**: acá el destino es un directorio local dentro del runner, deliberadamente, para no requerir cuentas cloud ni credenciales reales. Es un despliegue *simulado*. Lo que se está aprendiendo no es el `local-exec`, sino el **flujo**: infraestructura declarada en código, validada antes de aplicarse, ejecutada automáticamente desde el pipeline.
-
 ### Pregunta 16 (2 pts). ¿Por qué el workflow usa `${{ secrets.DEMO_TOKEN }}` en lugar de escribir el valor directamente?
 
 Porque `secrets` es un mecanismo con garantías que un literal en el YAML no tiene:
@@ -268,6 +255,6 @@ Porque `secrets` es un mecanismo con garantías que un literal en el YAML no tie
 4. **Permite rotar sin tocar el código.** Se actualiza en `Settings → Secrets and variables → Actions` y todos los workflows toman el nuevo valor en la siguiente ejecución. Cero commits, cero despliegues.
 5. **Es write-only y auditable.** Una vez guardado, ni el dueño del repositorio puede volver a leerlo desde la interfaz — solo reemplazarlo. GitHub además restringe su exposición: por defecto no se entrega a workflows disparados desde forks.
 
-Nótese el contraste deliberado dentro del mismo `cd.yml`: `${{ vars.APP_ENV }}` para configuración **legible** (`staging`) y `${{ secrets.DEMO_TOKEN }}` para un valor **sensible**. Mismo mecanismo de inyección, distinto nivel de protección — porque son dos categorías distintas de dato (ver Pregunta 10).
+Nótese el contraste deliberado dentro del mismo `cd.yml`: `${{ vars.APP_ENV }}` para configuración **legible** (`staging`) y `${{ secrets.DEMO_TOKEN }}` para un valor **sensible**. Mismo mecanismo de inyección, distinto nivel de protección — porque son dos categorías distintas de dato.
 
 Y el step `test -n "$DEMO_TOKEN"` cumple un rol de **fail-fast**: verifica que el secreto esté configurado y no vacío *antes* de llegar a `terraform apply`. Si falta, el pipeline corta temprano con un error claro, en lugar de fallar de forma confusa en una etapa posterior.
