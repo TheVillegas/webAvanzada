@@ -3,15 +3,15 @@
 Laboratorio evaluado — **Ingeniería Web Avanzada (OII436-1)**
 Git, Angular, Integración Continua y CD básico con Terraform · Segundo semestre 2026
 
-| Campo | Valor |
-|---|---|
-| Integrante 1 | _(completar)_ |
-| Integrante 2 | _(completar)_ |
-| Sección | _(completar)_ |
-| Fecha | 07 de septiembre de 2026 |
-| Rama obligatoria | `devops/ci-cd` |
-| Repositorio | https://github.com/TheVillegas/webAvanzada |
-| Pull Request | https://github.com/TheVillegas/webAvanzada/pull/1 |
+| Campo            | Valor                                                               |
+| ---------------- | ------------------------------------------------------------------- |
+| Integrante 1     | _(completar)_                                                       |
+| Integrante 2     | _(completar)_                                                       |
+| Sección          | _(completar)_                                                       |
+| Fecha            | 07 de septiembre de 2026                                            |
+| Rama obligatoria | `devops/ci-cd`                                                      |
+| Repositorio      | https://github.com/TheVillegas/webAvanzada                          |
+| Pull Request     | https://github.com/TheVillegas/webAvanzada/pull/1                   |
 | URL ejecución CI | https://github.com/TheVillegas/webAvanzada/actions/runs/34125137657 |
 
 ## Estructura
@@ -127,11 +127,9 @@ Esto ocurre porque los `steps` de un job son **secuenciales y con cortocircuito*
 
 Es un comportamiento **deseado**, no una limitación: si el código no supera las pruebas, construir el artefacto sería desperdiciar tiempo de runner sobre algo que ya sabemos que está mal. El pipeline falla rápido y barato.
 
-**Nota sobre un fallo adicional encontrado durante el laboratorio**: la primera ejecución del workflow falló antes del fallo controlado, con `Missing X server or $DISPLAY / Chrome failed 2 times (cannot start)`. Angular 20 intenta abrir Chrome en modo ventana y el runner no tiene entorno gráfico. Se corrigió declarando `"browsers": "ChromeHeadless"` en las opciones del target `test` de `frontend/angular.json`, lo que además vuelve reproducible la ejecución local. Es un caso ilustrativo de la Pregunta 6: el runner es un entorno distinto al de desarrollo, y el pipeline expone esas diferencias.
-
 ### Pregunta 9 (3 pts). ¿Debería integrarse este Pull Request a `main` mientras el pipeline está fallando? Justifique.
 
-**No.** Y no por formalismo burocrático, sino por lo que significa `main`.
+**No.** debido a lo que significa `main`.
 
 - `main` es la rama desde la que se despliega. En este mismo laboratorio, `cd.yml` se dispara con `push` sobre `main`: integrar código roto no lo deja "roto y quieto", lo **despliega automáticamente a staging**. El error se propaga solo.
 - Un pipeline en rojo es información concreta: el software **no cumple su contrato verificable**. Ignorarla convierte al CI en decoración. Un check que se saltea cuando molesta deja de ser una compuerta de calidad y pasa a ser ruido — y el equipo aprende a no mirarlo.
@@ -139,3 +137,56 @@ Es un comportamiento **deseado**, no una limitación: si el código no supera la
 - Se pierde la trazabilidad: cuando `main` está siempre verde, cualquier fallo nuevo apunta al último cambio. Cuando se tolera el rojo, ya no se puede distinguir el fallo nuevo del preexistente.
 
 El procedimiento correcto es el que se aplicó: corregir en la rama `devops/ci-cd`, pushear, esperar el check en verde y **recién entonces** integrar. Por eso conviene además proteger `main` con *branch protection* que exija el check aprobado — así la regla no depende de la disciplina de nadie.
+
+---
+
+## Parte III — Gestión segura de secretos y configuración
+
+### Pregunta 10 (4 pts). Clasifique cada elemento
+
+| Elemento | Clasificación | Justificación |
+|---|---|---|
+| `package.json` | **Versionable** | Define dependencias y scripts del proyecto. Es código: debe estar en el repositorio para que cualquiera —incluido el runner de CI— pueda reconstruir el mismo entorno. No contiene información sensible. |
+| API_URL pública | **Variable / configuración** | Cambia según el ambiente (desarrollo, staging, producción) pero no es secreta: viaja en cada request y es visible en el navegador. Va en una GitHub Variable o en un `.env.example`, nunca hardcodeada. |
+| `AWS_REGION` | **Variable / configuración** | Identifica *dónde* se despliega, no *quién* tiene permiso. Conocer la región no otorga ningún acceso. Es configuración por ambiente. |
+| `DB_PASSWORD` | **Secreto / no versionable** | Credencial de acceso directo a la base de datos. Su exposición compromete todos los datos. Va en un GitHub Secret o un gestor de secretos, jamás en el repositorio. |
+| `API_TOKEN` | **Secreto / no versionable** | Credencial que autentica y autoriza llamadas en nombre del sistema. Quien lo obtiene puede suplantar a la aplicación. Mismo tratamiento que una contraseña. |
+| `terraform.tfstate` | **Secreto / no versionable** | Es el registro del estado real de la infraestructura y almacena en **texto plano** los valores gestionados, incluidos atributos marcados como sensibles (contraseñas generadas, claves, endpoints privados). Además provoca conflictos de merge y corrupción de estado si dos personas lo versionan. Su lugar correcto es un *remote backend* con bloqueo (S3 + DynamoDB, Terraform Cloud, etc.). |
+
+**El criterio que ordena la tabla**: la pregunta no es "¿es importante?" sino **"¿qué pasa si un desconocido lo lee?"**. Si la respuesta es "nada", es versionable o configuración. Si la respuesta es "obtiene acceso", es un secreto.
+
+Y una distinción que se confunde seguido: **configuración ≠ secreto**. Ambos cambian por ambiente y ambos salen del código, pero por motivos distintos. La configuración sale para hacer el binario portable; el secreto sale para no filtrar acceso. Por eso GitHub los separa en dos mecanismos: `vars` (legibles, auditables) y `secrets` (write-only, enmascarados).
+
+### Pregunta 11 (2 pts). ¿Por qué una contraseña o token no debe escribirse directamente dentro de `ci.yml`, `cd.yml` o un archivo TypeScript del frontend?
+
+Por tres razones que se acumulan:
+
+**1. Un secreto en el repositorio es un secreto público.** El valor queda en la historia de Git y se replica en cada clon, fork, mirror y backup. En un repositorio público lo indexan bots en minutos —existen crawlers dedicados a escanear GitHub buscando credenciales—. Y aunque el repositorio sea privado, cualquier persona con acceso de lectura, presente o futura, lo obtiene: se pierde el principio de menor privilegio.
+
+**2. Se pierde la rotación y la trazabilidad.** Un secreto gestionado se cambia en un solo lugar y sigue funcionando. Uno hardcodeado obliga a un commit, un PR y un despliegue por cada rotación — así que en la práctica **no se rota nunca**. Además no hay registro de quién lo usó ni cuándo.
+
+**3. En el frontend es directamente inútil como protección.** Este punto es el más importante y el que más se subestima: TypeScript **se compila y se entrega al navegador**. Cualquier valor puesto ahí termina dentro del bundle JavaScript que se descarga el usuario, y se lee abriendo DevTools. No existe forma de ocultar un secreto en código de cliente — no es una mala práctica, es una imposibilidad técnica. Si una operación necesita una credencial, esa operación pertenece al backend.
+
+Por eso el workflow usa `${{ secrets.DEMO_TOKEN }}`: GitHub inyecta el valor como variable de entorno solo durante la ejecución del job, y además **enmascara** cualquier aparición del valor en los logs (lo reemplaza por `***`).
+
+### Pregunta 12 (2 pts). Si un secreto real fue incluido en un commit y luego se agrega su archivo a `.gitignore`, ¿queda solucionado el problema?
+
+**No. No queda solucionado en absoluto.**
+
+`.gitignore` solo evita que Git empiece a rastrear archivos **no rastreados**. No tiene ningún efecto retroactivo:
+
+- El archivo **ya está en la historia**. El blob con el secreto sigue accesible con `git log`, `git show <commit>:<archivo>` o navegando el commit en GitHub.
+- Si el archivo ya estaba siendo rastreado, `.gitignore` **ni siquiera lo deja de rastrear**: hay que ejecutar además `git rm --cached <archivo>`.
+- Cada clon, fork y backup existente **ya tiene una copia** del secreto. Aunque limpies el repositorio remoto, no controlás esas copias.
+
+**La acción adicional imprescindible es ROTAR EL SECRETO**, y es lo primero que hay que hacer. Desde el instante en que se publicó, hay que considerarlo comprometido: revocar la credencial en el proveedor y emitir una nueva. Limpiar la historia sin rotar es teatro de seguridad — el valor ya salió.
+
+Procedimiento completo, en orden de prioridad:
+
+1. **Rotar / revocar la credencial expuesta.** Urgente e innegociable. Todo lo demás es secundario.
+2. **Guardar el nuevo valor donde corresponde**: GitHub Secret, gestor de secretos o `.env` local ignorado.
+3. **Dejar de rastrear el archivo**: `git rm --cached .env` y commitear, con la regla ya presente en `.gitignore`.
+4. **Purgar la historia** si el repositorio es público o el riesgo lo amerita, con `git filter-repo` o BFG Repo-Cleaner. Ojo: esto **reescribe la historia**, cambia todos los hashes posteriores y obliga a un `push --force` coordinado con el equipo.
+5. **Auditar el uso** de la credencial expuesta por si hubo accesos indebidos, y **prevenir la reincidencia** con herramientas como `gitleaks` o `git-secrets` en un pre-commit hook.
+
+La lección de fondo: en seguridad no se pregunta *"¿alguien lo vio?"* sino *"¿pudo alguien verlo?"*. Si pudo, ya está comprometido.
